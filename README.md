@@ -1,0 +1,2 @@
+# astrbot_plugin_seedream_image
+给AstrBot添加用火山方舟SeedReam画图的功能
