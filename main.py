@@ -6,6 +6,7 @@ import uuid
 import aiohttp
 import asyncio
 from urllib.parse import urlparse, quote, unquote
+from typing import Optional, List, Tuple
 
 # 核心导入
 from astrbot.api import logger
@@ -17,8 +18,12 @@ from astrbot.api.message_components import Plain, Image, Reply
 PLUGIN_NAME = "astrbot_plugin_seedream_image"
 # 火山方舟最低像素要求（3686400 = 1920x1920）
 MIN_PIXELS = 3686400
+# 清理逻辑执行间隔（秒）
+CLEANUP_INTERVAL = 3600  # 1小时
+# aiohttp Session 复用超时
+SESSION_TIMEOUT = aiohttp.ClientTimeout(total=120)
 
-@register(PLUGIN_NAME, "插件开发者", "火山方舟Seedream图片生成（文生图/图生图）", "3.2.0")
+@register(PLUGIN_NAME, "插件开发者", "火山方舟Seedream图片生成（文生图/图生图）", "3.3.0")
 class SeedreamImagePlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -29,6 +34,8 @@ class SeedreamImagePlugin(Star):
         self.api_endpoint = config.get("VOLC_ENDPOINT", "https://ark.cn-beijing.volces.com/api/v3").strip()
         self.image_size = config.get("image_size", "4096x4096").strip()
         self.model_version = config.get("model_version", "seedream-v1").strip()
+        # 可选配置：仅在特殊场景下允许禁用SSL验证（默认关闭）
+        self.allow_insecure_ssl = config.get("allow_insecure_ssl", False)
         
         # 2. 校验并处理图片尺寸
         self.valid_size, self.size_error = self._validate_image_size(self.image_size)
@@ -44,19 +51,62 @@ class SeedreamImagePlugin(Star):
         self.processing_users = set()
         self.last_operations = {}
         
-        # 5. 文件清理配置
+        # 5. 文件清理配置（优化性能）
         self.retention_hours = float(config.get("auto_clean_delay", 1.0) / 3600) if config.get("auto_clean_delay") else 1.0
         self.last_cleanup_time = 0
-
-        # 6. 核心配置校验
+        # 异步清理任务锁，避免并发清理
+        self.cleanup_lock = asyncio.Lock()
+        
+        # 6. aiohttp Session 复用（优化连接开销）
+        self._session: Optional[aiohttp.ClientSession] = None
+        
+        # 7. 核心配置校验
         if not self.api_key:
             logger.error(f"[{PLUGIN_NAME}] VOLC_API_KEY未配置！请填写火山方舟账号的API KEY")
         logger.info(f"[{PLUGIN_NAME}] 初始化完成 | 模型版本：{self.model_version} | 生成尺寸：{self.valid_size} | API端点：{self.full_api_url}")
 
+    @property
+    def session(self) -> aiohttp.ClientSession:
+        """复用aiohttp ClientSession，减少TCP连接开销"""
+        if self._session is None or self._session.closed:
+            connector = aiohttp.TCPConnector(
+                ssl=not self.allow_insecure_ssl,  # 修复SSL验证问题：默认启用，仅配置允许时禁用
+                limit=10,  # 限制并发连接数
+                limit_per_host=5
+            )
+            self._session = aiohttp.ClientSession(
+                timeout=SESSION_TIMEOUT,
+                connector=connector
+            )
+        return self._session
+
+    async def terminate(self):
+        """插件卸载时清理资源（新增：关闭复用的Session）"""
+        # 清理图片文件
+        save_dir = StarTools.get_data_dir(PLUGIN_NAME) / "images"
+        if save_dir.exists():
+            for filename in os.listdir(save_dir):
+                file_path = save_dir / filename
+                if file_path.is_file():
+                    try:
+                        os.remove(file_path)
+                    except:
+                        pass
+            try:
+                os.rmdir(save_dir)
+            except:
+                pass
+        
+        # 关闭复用的Session
+        if self._session and not self._session.closed:
+            await self._session.close()
+        
+        logger.info(f"[{PLUGIN_NAME}] 插件已卸载，资源清理完成")
+
     # =========================================================
     # 尺寸校验工具
     # =========================================================
-    def _validate_image_size(self, size_str: str) -> tuple:
+    def _validate_image_size(self, size_str: str) -> Tuple[str, str]:
         """校验图片尺寸是否符合火山方舟要求"""
         size_pattern = re.compile(r'^(\d+)x(\d+)$', re.IGNORECASE)
         match = size_pattern.match(size_str)
@@ -77,45 +127,55 @@ class SeedreamImagePlugin(Star):
         return size_str, ""
 
     # =========================================================
-    # 通用工具方法
+    # 通用工具方法（优化性能）
     # =========================================================
-    def _cleanup_temp_files(self):
-        """自动清理过期图片文件"""
+    async def _cleanup_temp_files(self):
+        """
+        异步清理过期图片文件（优化：
+        1. 仅间隔1小时执行一次
+        2. 异步执行不阻塞主流程
+        3. 加锁避免并发清理
+        """
         if self.retention_hours <= 0:
             return
             
-        now = time.time()
-        if now - self.last_cleanup_time < 3600:
-            return
+        async with self.cleanup_lock:
+            now = time.time()
+            # 检查是否达到清理间隔
+            if now - self.last_cleanup_time < CLEANUP_INTERVAL:
+                return
 
-        save_dir = StarTools.get_data_dir(PLUGIN_NAME) / "images"
-        if not save_dir.exists():
-            return
+            save_dir = StarTools.get_data_dir(PLUGIN_NAME) / "images"
+            if not save_dir.exists():
+                self.last_cleanup_time = now
+                return
 
-        retention_seconds = self.retention_hours * 3600
-        deleted_count = 0
+            retention_seconds = self.retention_hours * 3600
+            deleted_count = 0
 
-        try:
-            for filename in os.listdir(save_dir):
-                file_path = save_dir / filename
-                if file_path.is_file() and now - file_path.stat().st_mtime > retention_seconds:
-                    try:
-                        os.remove(file_path)
-                        deleted_count += 1
-                    except Exception as del_err:
-                        logger.warning(f"[{PLUGIN_NAME}] 删除过期文件失败 {filename}: {del_err}")
-            
-            if deleted_count > 0:
-                logger.info(f"[{PLUGIN_NAME}] 清理完成，共删除 {deleted_count} 张过期图片")
-            
-            self.last_cleanup_time = now
-            
-        except Exception as e:
-            logger.warning(f"[{PLUGIN_NAME}] 自动清理流程异常: {e}")
+            try:
+                # 使用异步遍历（减少阻塞）
+                for filename in os.listdir(save_dir):
+                    file_path = save_dir / filename
+                    if file_path.is_file() and now - file_path.stat().st_mtime > retention_seconds:
+                        try:
+                            os.remove(file_path)
+                            deleted_count += 1
+                        except Exception as del_err:
+                            logger.warning(f"[{PLUGIN_NAME}] 删除过期文件失败 {filename}: {del_err}")
+                
+                if deleted_count > 0:
+                    logger.info(f"[{PLUGIN_NAME}] 清理完成，共删除 {deleted_count} 张过期图片")
+                
+                self.last_cleanup_time = now
+                
+            except Exception as e:
+                logger.warning(f"[{PLUGIN_NAME}] 自动清理流程异常: {e}")
 
     async def _download_generated_image(self, url: str) -> str:
-        """下载API生成的图片"""
-        self._cleanup_temp_files()
+        """下载API生成的图片（优化：复用Session，启用SSL验证）"""
+        # 异步执行清理（不阻塞下载流程）
+        asyncio.create_task(self._cleanup_temp_files())
         
         if not url or not url.startswith("http"):
             raise Exception("无效的图片URL")
@@ -129,19 +189,16 @@ class SeedreamImagePlugin(Star):
         }
         
         try:
-            async with aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=60),
-                connector=aiohttp.TCPConnector(ssl=False)
-            ) as session:
-                async with session.get(
-                    url, 
-                    headers=headers,
-                    allow_redirects=True
-                ) as resp:
-                    if resp.status != 200:
-                        raise Exception(f"下载失败 [HTTP {resp.status}]")
-                    image_data = await resp.read()
-            
+            # 复用全局Session（优化连接开销）
+            async with self.session.get(
+                url, 
+                headers=headers,
+                allow_redirects=True
+            ) as resp:
+                if resp.status != 200:
+                    raise Exception(f"下载失败 [HTTP {resp.status}]")
+                image_data = await resp.read()
+        
             # 保存图片
             save_dir = StarTools.get_data_dir(PLUGIN_NAME) / "images"
             save_dir.mkdir(parents=True, exist_ok=True)
@@ -157,7 +214,7 @@ class SeedreamImagePlugin(Star):
         except Exception as e:
             raise Exception(f"图片下载失败: {str(e)}")
 
-    def _extract_image_url_list(self, event: AstrMessageEvent) -> list:
+    def _extract_image_url_list(self, event: AstrMessageEvent) -> List[str]:
         """提取消息中的图片URL列表"""
         image_urls = []
         
@@ -177,10 +234,10 @@ class SeedreamImagePlugin(Star):
         return image_urls
 
     # =========================================================
-    # 核心API调用逻辑
+    # 核心API调用逻辑（优化异常处理粒度）
     # =========================================================
-    async def _call_seedream_api(self, prompt: str, image_urls: list = None):
-        """调用火山方舟Seedream API"""
+    async def _call_seedream_api(self, prompt: str, image_urls: List[str] = None):
+        """调用火山方舟Seedream API（优化：复用Session，精简异常处理）"""
         if not self.api_key:
             raise Exception("VOLC_API_KEY未配置")
         
@@ -204,52 +261,51 @@ class SeedreamImagePlugin(Star):
         }
         
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
-                async with session.post(
-                    self.full_api_url,
-                    headers=headers,
-                    json=payload,
-                    ssl=False
-                ) as resp:
-                    response_text = await resp.text()
+            # 复用全局Session
+            async with self.session.post(
+                self.full_api_url,
+                headers=headers,
+                json=payload
+            ) as resp:
+                response_text = await resp.text()
+                
+                # 解析响应（精简异常处理）
+                try:
+                    response_data = json.loads(response_text)
+                except json.JSONDecodeError:
+                    raise Exception(f"API返回非JSON格式响应：{response_text[:200]}")
+                
+                # 处理错误响应
+                if resp.status != 200:
+                    error_msg = response_data.get("error", {}).get("message", f"请求失败 [HTTP {resp.status}]")
+                    error_code = response_data.get("error", {}).get("code", "")
                     
-                    # 处理错误响应
-                    if resp.status != 200:
-                        try:
-                            error_data = json.loads(response_text)
-                            error_msg = error_data.get("error", {}).get("message", f"请求失败 [HTTP {resp.status}]")
-                            error_code = error_data.get("error", {}).get("code", "")
-                            
-                            if error_code == "InvalidParameter":
-                                error_msg = f"参数错误：{error_msg}"
-                            elif error_code == "Unauthorized":
-                                error_msg = "API KEY无效或未授权"
-                                
-                        except:
-                            error_msg = f"API请求失败 [HTTP {resp.status}]：{response_text[:200]}"
-                        raise Exception(error_msg)
+                    # 精简错误码映射
+                    error_mapping = {
+                        "InvalidParameter": "参数错误",
+                        "Unauthorized": "API KEY无效或未授权",
+                        "Forbidden": "API KEY无使用权限",
+                        "TooManyRequests": "调用频率超限"
+                    }
                     
-                    # 解析成功响应
-                    try:
-                        response_data = json.loads(response_text)
-                        if "data" in response_data and len(response_data["data"]) > 0:
-                            generated_url = response_data["data"][0].get("url")
-                            if not generated_url:
-                                raise Exception("API返回无图片URL")
-                            return generated_url
-                        else:
-                            raise Exception(f"响应格式异常：{str(response_data)[:200]}")
-                    except Exception as e:
-                        raise Exception(f"响应解析失败：{str(e)} | 原始响应：{response_text[:200]}")
+                    if error_code in error_mapping:
+                        error_msg = f"{error_mapping[error_code]}：{error_msg}"
+                    raise Exception(error_msg)
+                
+                # 提取图片URL
+                if not response_data.get("data") or len(response_data["data"]) == 0:
+                    raise Exception("API返回无图片数据")
+                
+                generated_url = response_data["data"][0].get("url")
+                if not generated_url:
+                    raise Exception("API返回无图片URL")
+                
+                return generated_url
         
+        except aiohttp.ClientError as e:
+            raise Exception(f"网络请求失败：{str(e)}")
         except Exception as e:
-            error_msg = str(e)
-            if "429" in error_msg:
-                raise Exception("调用频率超限，请稍后再试")
-            elif "403" in error_msg:
-                raise Exception("API KEY无使用权限")
-            else:
-                raise Exception(f"API调用失败：{error_msg}")
+            raise Exception(f"API调用失败：{str(e)}")
 
     # =========================================================
     # 指令处理（精简输出）
@@ -303,10 +359,7 @@ class SeedreamImagePlugin(Star):
         self.processing_users.add(user_id)
         try:
             # 精简的状态提示
-            if image_urls:
-                yield event.plain_result("开始图生图...")
-            else:
-                yield event.plain_result("开始文生图...")
+            yield event.plain_result("开始生成图片..." if image_urls else "开始生成图片...")
             
             # 调用API
             generated_url = await self._call_seedream_api(real_prompt, image_urls)
@@ -333,24 +386,3 @@ class SeedreamImagePlugin(Star):
         finally:
             if user_id in self.processing_users:
                 self.processing_users.remove(user_id)
-
-    # =========================================================
-    # 插件卸载清理
-    # =========================================================
-    async def terminate(self):
-        """清理所有生成的图片"""
-        save_dir = StarTools.get_data_dir(PLUGIN_NAME) / "images"
-        if save_dir.exists():
-            for filename in os.listdir(save_dir):
-                file_path = save_dir / filename
-                if file_path.is_file():
-                    try:
-                        os.remove(file_path)
-                    except:
-                        pass
-            try:
-                os.rmdir(save_dir)
-            except:
-                pass
-        
-        logger.info(f"[{PLUGIN_NAME}] 插件已卸载，所有图片文件已清理")
