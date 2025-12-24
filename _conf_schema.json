@@ -1,0 +1,37 @@
+{
+  "VOLC_API_KEY": {
+    "description": "火山方舟账号的API KEY",
+    "type": "string",
+    "hint": "敏感信息，请勿泄露给第三方",
+    "default": "",
+    "obvious_hint": true
+  },
+  "VOLC_ENDPOINT": {
+    "description": "火山方舟API访问端点",
+    "type": "string",
+    "hint": "可根据地域调整，默认北京节点，其他地域需替换对应域名",
+    "default": "https://ark.cn-beijing.volces.com/api/v3",
+    "obvious_hint": false
+  },
+  "image_size": {
+    "description": "生成图片的尺寸（需满足火山方舟最低3686400像素要求）",
+    "type": "string",
+    "hint": "选择图片的分辨率，推荐1920x1920/2048x2048（最低合规），4K需账号支持",
+    "default": "4096x4096",
+    "options": [
+      "1920x1920",
+      "2048x2048",
+      "2560x1440",
+      "3072x2048",
+      "3840x2160",
+      "4096x2160",
+      "4096x4096"
+    ]
+  },
+  "model_version": {
+    "description": "Seedream模型版本",
+    "type": "string",
+    "hint": "使用的Seedream模型版本",
+    "default": "seedream-v1"
+  }
+}
