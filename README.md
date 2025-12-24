@@ -1,3 +1,4 @@
+## 代码100%由豆包提供（
 # astrbot-plugin-seedream-image
 
 火山方舟Seedream模型图片生成插件，适配AstrBot机器人框架，支持文生图、图生图功能。
@@ -98,6 +99,7 @@ astrbot_plugin_seedream_image:
 - 当前版本：3.2.0
 - 适配框架：AstrBot
 - 支持功能：文生图、图生图、自动尺寸校验、自动文件清理
+
 
 
 
