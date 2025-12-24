@@ -1,7 +1,7 @@
 # 插件简介
 插件名称：astrbot_plugin_seedream_image  
-作者：寰宇中的星尘  
-版本：1.0.0  
+作者：Huanxing 代码100%由豆包编写
+版本：1.0.1  
 描述：使用火山方舟Seedream API生成图片，触发指令为“画图豆包”，支持图片自动清理、防重复请求等增强功能  
 标签：图片生成、火山方舟、Seedream、AstrBot、自动清理  
 
@@ -42,11 +42,10 @@
 
 | 配置项          | 类型   | 默认值                          | 说明                                                                 |
 |-----------------|--------|---------------------------------|----------------------------------------------------------------------|
-| VOLC_API_KEY    | string | ""                              | 火山方舟账号的API Key（需开通Seedream模型权限）                      |
-| VOLC_ENDPOINT   | string | https://ark.cn-beijing.volces.com/api/v3 | 火山方舟API端点（可根据地域调整）                                   |
-| image_size      | string | 1920x1920                       | 生成图片尺寸（需满足总像素≥3686400，支持1920x1920/2048x2048/3840x2160等） |
+| VOLC_API_KEY    | string | ""                              | 火山方舟账号的API Key（需开通Seedream模型权限）                         |
+| VOLC_ENDPOINT   | string | https://ark.cn-beijing.volces.com/api/v3 | 火山方舟API端点（可根据地域调整）                              |
+| image_size      | string | 1920x1920                       | 生成图片尺寸（需满足总像素≥3686400，支持1920x1920/2048x2048/3840x2160等 |
 | model_version   | string | seedream-v1                     | Seedream模型版本                                                     |
-| cleanup_delay   | int    | 10                              | 图片发送后自动清理延迟（秒），建议10~30秒                            |
 
 **配置方式**：  
 - 在插件配置文件（如 `astrbot_plugin_seedream_image.ini`）中填写：
@@ -56,4 +55,3 @@
   VOLC_ENDPOINT = https://ark.cn-beijing.volces.com/api/v3
   image_size = 1920x1920
   model_version = seedream-v1
-  cleanup_delay = 10
