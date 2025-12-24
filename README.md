@@ -29,7 +29,7 @@ astrbot_plugin_seedream_image:
   # 生成图片尺寸（支持1920x1920/2048x2048/4096x4096等）
   image_size: "4096x4096"
   # Seedream模型版本
-  model_version: "seedream-v1"
+  model_version: ""
 ```
 
 | 配置项 | 类型 | 说明 | 默认值 | 注意事项 |
@@ -37,7 +37,7 @@ astrbot_plugin_seedream_image:
 | VOLC_API_KEY | string | 火山方舟账号API KEY | 空 | 敏感信息，请勿泄露 |
 | VOLC_ENDPOINT | string | API访问端点 | https://ark.cn-beijing.volces.com/api/v3 | 可根据地域调整域名 |
 | image_size | string | 生成图片尺寸 | 4096x4096 | 最低要求1920x1920（3686400像素） |
-| model_version | string | Seedream模型版本 | seedream-v1 | 需与账号开通的模型版本匹配 |
+| model_version | string | Seedream模型版本 | 空 | 需与账号开通的模型版本匹配 |
 
 ## 使用方法
 ### 基础指令
@@ -98,5 +98,6 @@ astrbot_plugin_seedream_image:
 - 当前版本：3.2.0
 - 适配框架：AstrBot
 - 支持功能：文生图、图生图、自动尺寸校验、自动文件清理
+
 
 
