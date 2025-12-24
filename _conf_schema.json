@@ -32,6 +32,7 @@
     "description": "Seedream模型版本",
     "type": "string",
     "hint": "使用的Seedream模型版本",
-    "default": "seedream-v1"
+    "default": ""
   }
+
 }
