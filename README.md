@@ -40,7 +40,6 @@ astrbot_plugin_seedream_image:
 | VOLC_ENDPOINT | string | API访问端点 | https://ark.cn-beijing.volces.com/api/v3 | 可根据地域调整域名 |
 | image_size | string | 生成图片尺寸 | 4096x4096 | 最低要求1920x1920（3686400像素） |
 | model_version | string | Seedream模型版本 | seedream-v1 | 需与账号开通的模型版本匹配 |
-| auto_clean_delay | int | 图片保留时长（秒） | 3600 | 过期自动清理，0为禁用清理 |
 
 ## 使用方法
 ### 基础指令
@@ -101,3 +100,4 @@ astrbot_plugin_seedream_image:
 - 当前版本：3.2.0
 - 适配框架：AstrBot
 - 支持功能：文生图、图生图、自动尺寸校验、自动文件清理
+
