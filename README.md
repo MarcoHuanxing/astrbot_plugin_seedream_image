@@ -18,7 +18,7 @@
 3. 配置文件中填写必要参数（参考下方配置说明）
 
 ## 配置说明
-在AstrBot配置文件中添加以下配置项：
+在AstrBot面板中修改以下配置项：
 
 ```yaml
 astrbot_plugin_seedream_image:
@@ -30,8 +30,6 @@ astrbot_plugin_seedream_image:
   image_size: "4096x4096"
   # Seedream模型版本
   model_version: "seedream-v1"
-  # 图片自动清理延迟（秒，可选，默认3600）
-  auto_clean_delay: 3600
 ```
 
 | 配置项 | 类型 | 说明 | 默认值 | 注意事项 |
@@ -100,4 +98,5 @@ astrbot_plugin_seedream_image:
 - 当前版本：3.2.0
 - 适配框架：AstrBot
 - 支持功能：文生图、图生图、自动尺寸校验、自动文件清理
+
 
